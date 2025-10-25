@@ -1,88 +1,122 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>📸 PhotoPal — AI Portrait Assistant</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #fafafa;
-      color: #333;
-      margin: 40px auto;
-      max-width: 600px;
-      text-align: center;
-    }
-    h1 {
-      color: #222;
-    }
-    form {
-      border: 1px solid #ddd;
-      padding: 20px;
-      border-radius: 10px;
-      background: #fff;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
-    input, button {
-      margin: 10px 0;
-      padding: 8px;
-      font-size: 16px;
-    }
-    button {
-      background-color: #4CAF50;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      padding: 10px 16px;
-    }
-    button:hover {
-      background-color: #45a049;
-    }
-    #result {
-      white-space: pre-wrap;
-      text-align: left;
-      margin-top: 20px;
-      background: #f5f5f5;
-      padding: 15px;
-      border-radius: 8px;
-      border: 1px solid #ddd;
-    }
+    body { font-family: system-ui, Arial, sans-serif; background: #fafafa; color: #222; margin: 32px auto; max-width: 760px; }
+    h1 { margin-bottom: 8px; }
+    section { background:#fff; border:1px solid #ddd; border-radius:12px; padding:16px 18px; box-shadow:0 2px 6px rgba(0,0,0,0.05); margin-top:18px; }
+    form input, form button { margin: 8px 0; padding: 8px; font-size: 16px; }
+    form button { background:#4CAF50; border:none; color:#fff; border-radius:8px; padding:10px 16px; cursor:pointer; }
+    form button:hover { background:#45a049; }
+    #result { white-space: pre-wrap; text-align:left; background:#f7f7f7; border:1px solid #e6e6e6; padding:12px; border-radius:8px; margin-top:12px; }
+    video { width:100%; max-width:420px; border-radius:12px; background:#000; display:block; }
+    .row { display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start; }
+    pre { background:#f7f7f7; padding:12px; border-radius:8px; border:1px solid #e6e6e6; max-height:260px; overflow:auto; }
   </style>
 </head>
+
 <body>
   <h1>📷 Welcome to PhotoPal!</h1>
-  <p>Select your photo style and upload a picture for AI feedback.</p>
+  <p>Choose manul analysis or try real time coaching</p>
+  <section>
+    <h2> Manual Photo Upload</h2>
+    <form id="uploadForm" enctype="multipart/form-data">
+      <label for="style">Photo style:</label><br>
+      <input type="text" id="style" name="style" placeholder="e.g. natural candid" required><br><br>
 
-  <form id="uploadForm" enctype="multipart/form-data">
-    <label for="style">Photo style:</label><br>
-    <input type="text" id="style" name="style" placeholder="e.g. natural candid" required><br><br>
+      <label for="photo">Choose a photo:</label><br>
+      <input type="file" id="photo" name="photo" accept="image/*" required><br><br>
 
-    <label for="photo">Choose a photo:</label><br>
-    <input type="file" id="photo" name="photo" accept="image/*" required><br><br>
+      <button type="submit">Analyze Photo</button>
+    </form>
+    <div id="result"></div>
+  </section>
 
-    <button type="submit">Analyze Photo</button>
-  </form>
-
-  <div id="result"></div>
-
+  <!-- Live coaching with WebRTC -->
+  <section>
+    <h2>Live Coaching</h2>
+    <div class = "row">
+      <div>
+        <video id = "v" autoplay playsinline muted></video>
+        <div style="margin-top:8px">
+          <button id="startBtn">Start Live Coaching</button>
+        </div>
+      </div>
+      <div style="flex:1; min-width:280px;">
+        <strong>Realtime Tips</strong>
+        <pre id="log"></pre>
+      </div>
+    </div>
+    <p style="font-size:14px;opacity:.8">Tip: Use your phone’s back camera. On mobile, you may need HTTPS in production to access the camera.</p>
+  </section>
   <script>
+    // ---- Manual upload flow ----
     const form = document.getElementById('uploadForm');
     const resultDiv = document.getElementById('result');
-
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       resultDiv.innerHTML = "<p>Analyzing photo... please wait ⏳</p>";
-
-      const formData = new FormData(form);
-      const res = await fetch('/analyze', { method: 'POST', body: formData });
+      const fd = new FormData(form);
+      const res = await fetch('/analyze', { method: 'POST', body: fd });
       const data = await res.json();
-
-      if (data.error) {
-        resultDiv.innerHTML = `<p style='color:red;'>Error: ${data.error}</p>`;
-      } else {
-        resultDiv.innerHTML = `<h3>AI Suggestions</h3><p>${data.tips.replace(/\n/g, '<br>')}</p>`;
-      }
+      resultDiv.innerHTML = data.error
+        ? `<p style="color:red;">Error: ${data.error}</p>`
+        : `<h3>AI Suggestions</h3><p>${(data.tips || "").replace(/\n/g, "<br>")}</p>`;
     });
+
+    // ---- WebRTC live coaching ----
+    const startBtn = document.getElementById('startBtn');
+    const video = document.getElementById('v');
+    const logPre = document.getElementById('log');
+    const log = (m) => logPre.textContent += m + "\n";
+
+    async function startLive() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 720 }, height: { ideal: 1280 } },
+          audio: false
+        });
+        video.srcObject = stream;
+
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }]
+        });
+
+        // Data channel that server will echo tips on
+        const dc = pc.createDataChannel("tips");
+        dc.onmessage = (ev) => {
+          try {
+            const j = JSON.parse(ev.data);
+            log(`TIP: ${j.tip}  (luma ${j.luma}, tilt ${j.tilt_deg}°)`);
+          } catch {
+            log(`TIP: ${ev.data}`);
+          }
+        };
+
+        // Camera track to server
+        stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+        // Create & send offer
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        const resp = await fetch("/offer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sdp: offer.sdp, type: offer.type })
+        });
+        const answer = await resp.json();
+        await pc.setRemoteDescription(answer);
+
+        pc.oniceconnectionstatechange = () => log(`ICE: ${pc.iceConnectionState}`);
+      } catch (err) {
+        log("Error: " + (err?.message || err));
+      }
+    }
+
+    startBtn.addEventListener('click', startLive);
   </script>
 </body>
 </html>
